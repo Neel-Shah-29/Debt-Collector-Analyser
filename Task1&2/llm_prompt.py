@@ -1,7 +1,7 @@
 import requests
 import json
 import re
-
+PROMPT_RESULTS: list[tuple[str, str, str, str]] = []
 def extract_json_str(s: str) -> str:
     """
     Finds the first {...} substring in s and returns it, else returns s unchanged.
@@ -31,6 +31,7 @@ def call_hf_api(prompt, api_key, model='mistralai/Mixtral-8x7B-Instruct-v0.1'):
 
 
 def prompt_analysis(convs, api_key, task):
+    global PROMPT_RESULTS
     agent_ids, borrower_ids, violating_ids = [], [], []
     for cid, utts in convs.items():
         transcript = "\n".join(f"{u['speaker']}: {u['text']}" for u in utts)
@@ -44,7 +45,7 @@ def prompt_analysis(convs, api_key, task):
                 "  - explanation: one-sentence rationale quoting the offending phrase if any\n\n"
                 f"Transcript:\n{transcript}\n\n"
                 "Question: Does the **agent** use profanity in this call?  \n"
-                "Only return a valid JSON object, nothing else. No need to mention the question or prompt again."
+                "Only return a valid JSON object, nothing else. No need to mention the question or prompt again.Answer and Explanation parameters are the must and cannot be skipped."
             )
             raw = call_hf_api(prompt_a, api_key)
             trimmed = extract_json_str(raw)
@@ -55,6 +56,7 @@ def prompt_analysis(convs, api_key, task):
                 obj = {"answer":"No","explanation":"Parsing error—assuming no profanity."}
             if obj["answer"].lower()=="yes":
                 agent_ids.append((cid, obj["explanation"]))
+                PROMPT_RESULTS.append((cid, task, "agent", obj["explanation"]))
 
             # Borrower prompt
             prompt_b = (
@@ -64,7 +66,7 @@ def prompt_analysis(convs, api_key, task):
                 "  • explanation: one-sentence rationale quoting the offending phrase if any\n\n"
                 f"Transcript:\n{transcript}\n\n"
                 "Question: Does the **borrower** use profanity in this call?  \n"
-                "Only return a valid JSON object, nothing else. No need to mention the question or prompt again."
+                "Only return a valid JSON object, nothing else. No need to mention the question or prompt again. Answer and Explanation parameters are the must and cannot be skipped."
             )
             raw_b = call_hf_api(prompt_b, api_key)
             trimmed_b = extract_json_str(raw_b)
@@ -75,7 +77,7 @@ def prompt_analysis(convs, api_key, task):
                 obj = {"answer":"No","explanation":"Parsing error—assuming no profanity."}
             if obj["answer"].lower()=="yes":
                 borrower_ids.append((cid, obj["explanation"]))
-
+                PROMPT_RESULTS.append((cid, task, "borrower", obj["explanation"]))
         else:
             # Privacy prompt
             prompt = (
@@ -91,7 +93,7 @@ def prompt_analysis(convs, api_key, task):
                         "Read the following debt-collection call transcript and answer as JSON with two fields:\n"
                         "  - answer: \"Yes\" or \"No\"  \n"
                         "  - explanation: one-sentence rationale quoting the compliancy violation phrase if any\n\n"
-                        "Return only the JSON object and nothing else."
+                        "Return only the JSON object and nothing else. Answer and Explanation parameters are the must and cannot be skipped."
                         )
             raw = call_hf_api(prompt, api_key)
             trimmed = extract_json_str(raw)
@@ -102,9 +104,42 @@ def prompt_analysis(convs, api_key, task):
                 obj = {"answer":"No","explanation":"Parsing error—assuming compliant."}
             if obj["answer"].lower()=="yes":
                 violating_ids.append((cid, obj["explanation"]))
+                PROMPT_RESULTS.append((cid, task, "agent", obj["explanation"]))
 
     # Return list of tuples (call_id, explanation) so UI can use call_id as dropdown key
     if task == "Profanity":
-        return agent_ids, borrower_ids
+        return agent_ids, borrower_ids, PROMPT_RESULTS
     else:
-        return violating_ids
+        return violating_ids, PROMPT_RESULTS
+
+
+def final_decision_tool(
+    transcript: str,
+    pat_flag: bool,
+    pat_snip: str,
+    ml_flag: bool,
+    llm_flag: bool,
+    llm_expl: str,
+    api_key: str,
+    task: str
+) -> dict:
+    """
+    Final prompt that ingests all signals and returns JSON {answer, explanation}.
+    We weight: Pattern(25%), ML(25%), LLM(50%).
+    """
+    summary = (
+        f"Transcript:\n{transcript}\n\n"
+        f"PatternFlag: {pat_flag}, snippet: '{pat_snip}'\n"
+        f"MLFlag: {ml_flag}\n"
+        f"LLMFlag: {llm_flag}, explanation: '{llm_expl}'\n\n"
+        "Based on these signals, and weighting Pattern=25%, ML=25%, LLM=50%,\n"
+        "return a JSON object with:\n"
+        "  answer: \"Yes\" or \"No\"\n"
+        "  explanation: one-sentence rationale for your final decision\n"
+        "Only return the JSON object."
+    )
+    out = extract_json_str(call_hf_api(summary, api_key))
+    try:
+        return json.loads(out)
+    except:
+        return {"answer":"No","explanation":"Unable to parse final decision."}
