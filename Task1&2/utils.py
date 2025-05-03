@@ -1,35 +1,3 @@
-# import os
-# import json
-# import re
-
-# PROFANITY_WORDS = ["asshole", "bastard", "bitch", "damn", "fuck", "hell", "piss", "shit", "crap", "jerk"]
-# PROF_PATTERN = re.compile(r"\b(" + "|".join(PROFANITY_WORDS) + r")\b", re.IGNORECASE)
-# SENSITIVE = ["balance", "owe", "debt", "account", "owing", "due", "statement"]
-# VERIFY = ["date of birth", "dob", "address", "social security", "ssn"]
-
-# def load_json_convs(files) -> dict:
-#     convs = {}
-#     for file in files:
-#         name = os.path.splitext(file.name)[0]
-#         convs[name] = json.load(file)
-#     return convs
-
-# def annotate_data(convs):
-#     records = []
-#     for cid, utts in convs.items():
-#         verified = False
-#         for utt in utts:
-#             text = utt['text']; speaker = utt['speaker'].lower()
-#             prof = int(bool(PROF_PATTERN.search(text)))
-#             if speaker.startswith("agent"):
-#                 if any(v in text.lower() for v in VERIFY): verified = True
-#                 priv = int(any(s in text.lower() for s in SENSITIVE) and not verified)
-#             else:
-#                 priv = 0
-#             records.append({'text': text, 'profanity': prof, 'privacy': priv})
-#     return records
-
-
 import os, json, re
 import numpy as np
 from typing import Dict, List, Tuple
